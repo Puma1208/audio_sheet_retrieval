@@ -5,14 +5,14 @@ from __future__ import print_function
 
 import os
 import pickle
-import lasagne
+# import lasagne
 import argparse
 
-from config.settings import EXP_ROOT
-from utils import mutopia_data
+from audio_sheet_retrieval.config.settings import EXP_ROOT
+from audio_sheet_retrieval.utils import mutopia_data
 
 # init color printer
-from utils.plotting import BColors
+from audio_sheet_retrieval.utils.plotting import BColors
 col = BColors()
 
 
@@ -22,10 +22,10 @@ def select_model(model_path):
     model_str = os.path.basename(model_path)
     model_str = model_str.split('.py')[0]
     exec('from models import ' + model_str + ' as model')
-
-    from utils.train_dcca_pool import fit
-
     model.EXP_NAME = model_str
+    print(model.EXP_NAME)
+    from audio_sheet_retrieval.utils.train_dcca_pool import fit
+
     return model, fit
 
 

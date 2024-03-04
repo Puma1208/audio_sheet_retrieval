@@ -115,9 +115,9 @@ def threaded_generator(generator, num_cached=10):
     """
     Threaded generator
     """
-    import Queue
-    queue = Queue.Queue(maxsize=num_cached)
-    queue = Queue.Queue(maxsize=num_cached)
+    import queue as q
+    queue = q.Queue(maxsize=num_cached)
+    queue = q.Queue(maxsize=num_cached)
     end_marker = object()
 
     # define producer
@@ -188,13 +188,14 @@ class MultiviewPoolIteratorUnsupervised(object):
         return self
 
     def __iter__(self):
+        print(f'called in batch_iterators line 191')
         n_samples = self.k_samples
         bs = self.batch_size
 
         # compute current epoch index
         idx_epoch = np.mod(self.epoch_counter, self.n_epochs)
 
-        for i in range((n_samples + bs - 1) / bs):
+        for i in range(int((n_samples + bs - 1) / bs)):
 
             i_start = i * bs + idx_epoch * self.k_samples
             i_stop = (i + 1) * bs + idx_epoch * self.k_samples

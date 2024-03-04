@@ -154,9 +154,9 @@ if __name__ == '__main__':
         abs_pxl_errors = np.abs(pxl_errors)
 
         # report results for piece
-        print "Mean Error:   %.3f" % np.mean(abs_pxl_errors)
-        print "Median Error: %.3f" % np.median(abs_pxl_errors)
-        print "Max Error:    %.3f" % np.max(abs_pxl_errors)
+        print("Mean Error:   %.3f" % np.mean(abs_pxl_errors))
+        print( "Median Error: %.3f" % np.median(abs_pxl_errors))
+        print( "Max Error:    %.3f" % np.max(abs_pxl_errors))
 
         piece_pxl_errors[piece] = pxl_errors
 

@@ -83,14 +83,14 @@ class AudioScoreRetrievalPool(object):
                 onsets = onsets.reshape((-1, 1))
                 coords = coords.reshape((-1, 1))
                 new_mapping = np.hstack((onsets, coords))
-                self.o2c_maps[i_sheet][i_spec] = new_mapping.astype(np.int)
+                self.o2c_maps[i_sheet][i_spec] = new_mapping.astype(int)
 
     def prepare_train_entities(self):
         """
         Collect train entities
         """
 
-        self.train_entities = np.zeros((0, 3), dtype=np.int)
+        self.train_entities = np.zeros((0, 3), dtype=int)
 
         # iterate sheets
         for i_sheet, sheet in enumerate(self.images):
@@ -232,7 +232,7 @@ def onset_to_coordinates(alignment, mdict, note_events):
     """
     Compute onset to coordinate mapping
     """
-    onset_to_coord = np.zeros((0, 2), dtype=np.int)
+    onset_to_coord = np.zeros((0, 2), dtype=int)
 
     for m_objid, e_idx in alignment:
 
@@ -246,7 +246,7 @@ def onset_to_coordinates(alignment, mdict, note_events):
         cy, cx = m.middle
 
         # keep mapping
-        entry = np.asarray([onset_frame, cx], dtype=np.int)[np.newaxis]
+        entry = np.asarray([np.append(onset_frame,cx)], dtype=int)#[np.newaxis]
         if onset_frame not in onset_to_coord[:, 0]:
             onset_to_coord = np.concatenate((onset_to_coord, entry), axis=0)
 
@@ -277,7 +277,7 @@ def systems_to_rois(sys_mungos, window_top=10, window_bottom=10):
         system = system.reshape((1, 4, 2))
         page_rois = np.vstack((page_rois, system))
 
-    return page_rois.astype(np.int)
+    return page_rois.astype(int)
 
 
 def stack_images(images, mungos_per_page, mdict):
