@@ -37,7 +37,8 @@ for key in NO_AUGMENT.keys():
 class AudioScoreRetrievalPool(object):
 
     def __init__(self, images, specs, o2c_maps,
-                 spec_context=SPEC_CONTEXT, sheet_context=SHEET_CONTEXT, staff_height=SYSTEM_HEIGHT,
+                 spec_context, sheet_context, staff_height,
+                #  spec_context=SPEC_CONTEXT, sheet_context=SHEET_CONTEXT, staff_height=SYSTEM_HEIGHT,
                  data_augmentation=None, shuffle=True):
 
         self.images = images
@@ -107,7 +108,7 @@ class AudioScoreRetrievalPool(object):
 
                     coord = self.o2c_maps[i_sheet][i_spec][i_onset, 1]
                     c_start = coord - self.sheet_context // 2
-                    c_stop = o_start + self.sheet_context
+                    c_stop = c_start + self.sheet_context
 
                     if o_start >= 0 and o_stop < spec.shape[1]\
                             and c_start >= 0 and c_stop < sheet.shape[1]:
@@ -138,16 +139,18 @@ class AudioScoreRetrievalPool(object):
         c1 = min(c0 + 4 * self.sheet_context, sheet.shape[1])
         c0 = max(0, c1 - 4 * self.sheet_context)
         sheet = sheet[:, c0:c1]
+        # print(f'I ONSET: {i_onset} with {target_coord} >> {c0, c1}')
 
-        if self.data_augmentation['sheet_scaling']:
-            import cv2
-            sc = self.data_augmentation['sheet_scaling']
-            scale = (sc[1] - sc[0]) * np.random.random_sample() + sc[0]
-            new_size = (int(sheet.shape[1] * scale), int(sheet.shape[0] * scale))
-            sheet = cv2.resize(sheet, new_size, interpolation=cv2.INTER_NEAREST)
+        # if self.data_augmentation['sheet_scaling']:
+        #     import cv2
+        #     sc = self.data_augmentation['sheet_scaling']
+        #     scale = (sc[1] - sc[0]) * np.random.random_sample() + sc[0]
+        #     new_size = (int(sheet.shape[1] * scale), int(sheet.shape[0] * scale))
+        #     sheet = cv2.resize(sheet, new_size, interpolation=cv2.INTER_NEAREST)
 
         # target coordinate
-        x = sheet.shape[1] // 2
+        # x = sheet.shape[1] // 2
+        x = target_coord
 
         # compute sliding window coordinates
         x0 = np.max([x - self.sheet_context // 2, 0])
@@ -164,6 +167,7 @@ class AudioScoreRetrievalPool(object):
         r1 = r0 + self.staff_height
 
         # get sheet snippet
+        # print(f'    {r0}, {r1} -> {x0}, {x1}')
         sheet_snippet = sheet[r0:r1, x0:x1]
 
         return sheet_snippet
@@ -233,12 +237,12 @@ def onset_to_coordinates(alignment, mdict, note_events):
     Compute onset to coordinate mapping
     """
     onset_to_coord = np.zeros((0, 2), dtype=int)
-
+    coord_to_system = np.zeros((0, 2), dtype=int)
+    # systems = dict()
     for m_objid, e_idx in alignment:
 
         # get note mungo and midi note event
-        m, e = mdict[m_objid], note_events[e_idx]
-
+        m, e = mdict[m_objid][0], note_events[e_idx]
         # compute onset frame
         onset_frame = notes_to_onsets([e], dt=1.0 / FPS)
 
@@ -247,10 +251,14 @@ def onset_to_coordinates(alignment, mdict, note_events):
 
         # keep mapping
         entry = np.asarray([np.append(onset_frame,cx)], dtype=int)#[np.newaxis]
+        
+        system_id = mdict[m_objid][1]
+        system_entry = np.array([np.append(cx, system_id)])
         if onset_frame not in onset_to_coord[:, 0]:
             onset_to_coord = np.concatenate((onset_to_coord, entry), axis=0)
+            coord_to_system = np.concatenate((coord_to_system, system_entry), axis=0)
 
-    return onset_to_coord
+    return onset_to_coord, coord_to_system
 
 
 def systems_to_rois(sys_mungos, window_top=10, window_bottom=10):
@@ -325,7 +333,6 @@ def unwrap_sheet_image(image, system_mungos, mdict, window_top=100, window_botto
     x_offset = 0
     img_start = 0
     for j, sys_mungo in enumerate(system_mungos):
-
         # get current roi
         r = rois[j]
 
@@ -350,12 +357,11 @@ def unwrap_sheet_image(image, system_mungos, mdict, window_top=100, window_botto
 
         # get noteheads of current staff
         staff_noteheads = [mdict[i] for i in sys_mungo.inlinks if mdict[i].clsname == 'notehead-full']
-
         # compute unwraped coordinates
         for n in staff_noteheads:
             n.x -= r[0, 0]
             n.y += x_offset - r[0, 1]
-            un_wrapped_coords[n.objid] = n
+            un_wrapped_coords[n.objid] = [n, j]
 
         x_offset += (r[1, 1] - r[0, 1])
         img_start = img_end
@@ -366,7 +372,7 @@ def unwrap_sheet_image(image, system_mungos, mdict, window_top=100, window_botto
     return un_wrapped_image, un_wrapped_coords
 
 
-def prepare_piece_data(collection_dir, piece_name, aug_config=NO_AUGMENT, require_audio=True, load_midi_matrix=False):
+def prepare_piece_data(collection_dir, piece_name, aug_config=NO_AUGMENT, require_audio=True, load_midi_matrix=False, get_system_index=False):
     """
 
     :param collection_dir:
@@ -377,7 +383,6 @@ def prepare_piece_data(collection_dir, piece_name, aug_config=NO_AUGMENT, requir
     # piece loading
     piece = Piece(root=collection_dir, name=piece_name)
     score = piece.load_score(piece.available_scores[0])
-
     # get mungos
     mungos = score.load_mungos()
     mdict = {m.objid: m for m in mungos}
@@ -400,17 +405,17 @@ def prepare_piece_data(collection_dir, piece_name, aug_config=NO_AUGMENT, requir
     spectrograms = []
     midi_matrices = []
     onset_to_coord_maps = []
-
+    coord_to_system_maps = []
     for performance_key in piece.available_performances:
-
         # check if performance matches augmentation pattern
         tempo, synth = performance_key.split("tempo-")[1].split("_", 1)
         tempo = float(tempo) / 1000
 
-        if synth not in aug_config["synths"]\
-                or tempo < aug_config["tempo_range"][0]\
-                or tempo > aug_config["tempo_range"][1]:
-            continue
+        # if synth not in aug_config["synths"]\
+        #         or tempo < aug_config["tempo_range"][0]\
+        #         or tempo > aug_config["tempo_range"][1]:
+        #     print(f'Edinging up here: {synth not in aug_config["synths"], tempo < aug_config["tempo_range"][0], tempo > aug_config["tempo_range"][1]}')
+        #     continue
 
         # load current performance
         performance = piece.load_performance(performance_key, require_audio=require_audio)
@@ -424,17 +429,18 @@ def prepare_piece_data(collection_dir, piece_name, aug_config=NO_AUGMENT, requir
         # load spectrogram
         spec = performance.load_spectrogram()
         spectrograms.append(spec)
-
         # compute onset to coordinate mapping
-        onset_to_coord = onset_to_coordinates(alignment, un_wrapped_coords, note_events)
+        onset_to_coord, coord_to_system = onset_to_coordinates(alignment, un_wrapped_coords, note_events)
         onset_to_coord_maps.append(onset_to_coord)
-
+        coord_to_system_maps.append(coord_to_system)
         if load_midi_matrix:
             midi = performance.load_midi_matrix()
             midi_matrices.append(midi)
-
+            
     if load_midi_matrix:
         return un_wrapped_image, spectrograms, onset_to_coord_maps, midi_matrices
+    elif get_system_index:
+        return un_wrapped_image, spectrograms, onset_to_coord_maps, coord_to_system_maps
     else:
         return un_wrapped_image, spectrograms, onset_to_coord_maps
 
@@ -468,15 +474,15 @@ def load_audio_score_retrieval():
 if __name__ == "__main__":
     """ main """
 
-    pool = load_audio_score_retrieval()
+    # pool = load_audio_score_retrieval()
 
-    for i in range(100):
-        sheet, spec = pool[i:i+1]
+    # for i in range(100):
+    #     sheet, spec = pool[i:i+1]
 
-        plt.figure()
-        plt.clf()
-        plt.subplot(1, 2, 1)
-        plt.imshow(sheet[0, 0], cmap="gray")
-        plt.subplot(1, 2, 2)
-        plt.imshow(spec[0, 0], cmap="viridis", origin="lower")
-        plt.show()
+    #     plt.figure()
+    #     plt.clf()
+    #     plt.subplot(1, 2, 1)
+    #     plt.imshow(sheet[0, 0], cmap="gray")
+    #     plt.subplot(1, 2, 2)
+    #     plt.imshow(spec[0, 0], cmap="viridis", origin="lower")
+    #     plt.show()
